@@ -6,12 +6,14 @@ O mesmo modelo roda em três cenários:
 - PostgreSQL gerenciado em ambiente serverless (Vercel + Neon/Supabase): sem pool no processo,
   porque cada invocação é efêmera e o pooler fica do lado do banco.
 """
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import NotSupportedError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -97,18 +99,27 @@ def init_db(drop: bool = False) -> None:
 
 
 def _setup_timescale() -> None:
-    """Aplica hypertables/compressão/agregado contínuo quando a extensão existe.
+    """Aplica hypertables, compressão e agregado contínuo quando o TimescaleDB completo está disponível.
 
-    Em PostgreSQL gerenciado sem TimescaleDB (ex.: Neon), a aplicação funciona normalmente:
-    o repositório de séries usa SQL portável e a chave primária (variable_id, ts) atende as consultas.
+    - PostgreSQL sem a extensão: nada a fazer.
+    - TimescaleDB com licença Apache (ex.: Neon): compressão e agregados contínuos não existem nessa
+      edição; a transação inteira é desfeita e o banco segue como PostgreSQL padrão.
+    Em todos os casos a aplicação funciona: o repositório de séries usa SQL portável e a chave
+    primária (variable_id, ts) atende as consultas.
     """
     sql_path = Path(__file__).resolve().parent.parent / "db" / "timescale" / "001_hypertables.sql"
     if not sql_path.exists():
         return
-    with engine.begin() as conn:
-        has_ts = conn.execute(
-            text("SELECT count(*) FROM pg_available_extensions WHERE name = 'timescaledb'")
-        ).scalar()
-        if not has_ts:
-            return
-        conn.execute(text(sql_path.read_text(encoding="utf-8")))
+    try:
+        with engine.begin() as conn:
+            has_ts = conn.execute(
+                text("SELECT count(*) FROM pg_available_extensions WHERE name = 'timescaledb'")
+            ).scalar()
+            if not has_ts:
+                return
+            conn.execute(text(sql_path.read_text(encoding="utf-8")))
+    except NotSupportedError as exc:
+        logging.getLogger(__name__).warning(
+            "TimescaleDB disponível sem os recursos completos (%s). Seguindo com PostgreSQL padrão.",
+            str(exc.orig).splitlines()[0],
+        )

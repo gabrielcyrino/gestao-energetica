@@ -48,6 +48,17 @@ flowchart LR
    em regiões distantes somam latência a cada consulta.
 3. Plano **Free** é suficiente para a DEMO (a base ocupa algumas dezenas de MB; limite do plano: 0,5 GB).
 4. Conecte o banco ao projeto marcando **Production, Preview e Development**.
+5. Nas opções avançadas da conexão:
+
+   | Opção | Escolha | Motivo |
+   |---|---|---|
+   | *Create database branch for deployment* → **Production** | **desmarcado** | produção usa o branch principal do Neon, onde a carga DEMO é feita e onde os dados gravados pela aplicação persistem entre deploys |
+   | *Create database branch for deployment* → **Preview** | desmarcado (opcional) | marcado, cada *preview deployment* ganha uma cópia isolada do banco; útil com pull requests, mas consome a cota de branches do plano gratuito |
+   | **Custom Prefix** | **vazio** | sem prefixo a variável se chama `DATABASE_URL`, que a API lê; um prefixo como `NEON_` geraria `NEON_DATABASE_URL`, que a API **não** lê |
+
+   Se o campo de prefixo for obrigatório, use `EE_` — o resultado `EE_DATABASE_URL` também é lido pela API.
+   Confira em *Settings → Environment Variables* que `DATABASE_URL` (ou `EE_DATABASE_URL`) e
+   `DATABASE_URL_UNPOOLED` foram criadas.
 
 A integração cria sozinha, entre outras, estas variáveis no projeto:
 
@@ -74,7 +85,7 @@ banco → aba de variáveis (*Show secret*), ou console do Neon → *Connect* co
 cd C:\Users\Gabriel\Downloads\bayer-eficiencia-energetica\backend
 
 $env:EE_DATABASE_URL  = "postgresql://neondb_owner:SENHA@ep-XXXX.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-$env:EE_SEED_PASSWORD = "escolha-uma-senha-forte"    # senha dos 5 usuários de demonstração
+$env:EE_SEED_PASSWORD = "escolha-uma-senha-forte"    # OPCIONAL — sem ela a senha é "demo" (ver nota abaixo)
 
 .venv\Scripts\python -m app.seed.run
 
@@ -85,6 +96,7 @@ Remove-Item Env:EE_DATABASE_URL, Env:EE_SEED_PASSWORD
 Saída esperada (o tempo depende da sua conexão; as medições são carregadas com `COPY`):
 
 ```
+TimescaleDB disponível sem os recursos completos (functionality not supported under the current "apache" license...). Seguindo com PostgreSQL padrão.
 banco: postgresql+psycopg://neondb_owner:***@ep-XXXX.us-east-1.aws.neon.tech/neondb?...
 ...
 [  ... s] medições: 271846
@@ -92,9 +104,16 @@ banco: postgresql+psycopg://neondb_owner:***@ep-XXXX.us-east-1.aws.neon.tech/neo
 Base DEMO criada com sucesso.
 ```
 
-- Rodar de novo **recria** o schema do zero (apaga o que houver no banco).
-- O Neon não tem TimescaleDB; a aplicação detecta e usa PostgreSQL puro, sem impacto no funcionamento.
-- Guarde a senha usada em `EE_SEED_PASSWORD`: é com ela que se entra no dashboard publicado.
+- A primeira linha é **esperada** no Neon: ele oferece o TimescaleDB na edição de licença Apache, sem compressão
+  nem agregados contínuos. A carga detecta isso, desfaz a configuração do TimescaleDB e segue com PostgreSQL
+  padrão — a aplicação não depende desses recursos.
+- Rodar de novo **recria** o schema do zero (apaga o que houver no banco), inclusive depois de uma tentativa que
+  falhou no meio.
+- A base ocupa cerca de 42 MB (limite do plano gratuito: 0,5 GB).
+- **Senha dos usuários de demonstração.** Sem `EE_SEED_PASSWORD`, a senha é `demo` e os botões de login com um
+  clique funcionam — quem tiver o link entra com qualquer perfil (dados fictícios; um novo seed restaura tudo).
+  Com uma senha própria, defina também **`EE_DEMO_AUTH=false`** na Vercel: os botões de um clique enviam
+  sempre `demo` e deixariam de funcionar; o login passa a ser pelo formulário.
 
 ## 4. Variáveis de ambiente na Vercel
 
@@ -139,8 +158,9 @@ ociosa e a função Python também tem *cold start*.
 ## 6. Segurança antes de compartilhar o endereço
 
 1. `EE_JWT_SECRET` aleatório e exclusivo (sem ele, vale o segredo padrão do código).
-2. Senha de demonstração própria via `EE_SEED_PASSWORD` (sem ela, a senha publicada é `demo`).
-3. `EE_DEMO_AUTH=false` para esconder a lista de perfis (o login por formulário continua funcionando).
+2. Senha de demonstração própria via `EE_SEED_PASSWORD` (sem ela, a senha publicada é `demo`) **junto com**
+   `EE_DEMO_AUTH=false` — os botões de um clique usam `demo` e precisam ser escondidos quando a senha muda.
+3. O login pelo formulário continua funcionando com a senha definida no seed.
 4. Se o conteúdo não puder ser público: *Settings → Deployment Protection*.
 5. Mantenha o aviso **DEMO/MOCK DATA** enquanto os dados não forem reais.
 
@@ -151,7 +171,7 @@ ociosa e a função Python também tem *cold start*.
 | Cold start | função Python + Neon suspenso: a primeira chamada pode levar alguns segundos | desligar *autosuspend* no Neon (planos pagos) ou manter a API em servidor contínuo |
 | Duração máxima | `maxDuration: 60` no `vercel.json`; consultas medidas entre 0,02 s e 0,5 s | reduza para `10` se o plano recusar |
 | Worker/cron | materialização de `indicator_value` e alarmes não rodam | Vercel Cron chamando endpoint protegido, ou worker fora da Vercel |
-| TimescaleDB | indisponível no Neon | volume industrial real (1 min, anos de retenção): Timescale Cloud, trocando só a URL |
+| TimescaleDB | no Neon só a edição Apache (sem compressão e agregados contínuos); a aplicação usa PostgreSQL padrão | volume industrial real (1 min, anos de retenção): Timescale Cloud, trocando só a URL |
 | Logs | `vercel logs gestao-energetica` | qualquer erro da função aparece ali com o traceback |
 
 ## 8. Problemas comuns
@@ -161,6 +181,7 @@ ociosa e a função Python também tem *cold start*.
 | 500 `FUNCTION_INVOCATION_FAILED` em todas as rotas; log com `RuntimeError: SQLite não funciona em ambiente serverless` | banco não conectado, ou variável criada sem redeploy | passos 2 e 4, depois **Redeploy** |
 | 500 em todas as rotas mesmo com banco configurado | `"framework": null` removido ou preset escolhido no painel | restaurar o `vercel.json`; em *Settings → Build and Deployment*, Framework Preset = *Other* |
 | `relation "app_user" does not exist` nos logs | banco conectado, carga não executada | passo 3 |
+| Seed interrompido com `functionality not supported under the current "apache" license` | versão do código anterior a esta correção | atualize o repositório (`git pull`) e rode o seed de novo |
 | Login recusado | senha diferente da usada no seed | repetir o passo 3 com `EE_SEED_PASSWORD` conhecido |
 | Seed falha com `connection timeout` | string errada, banco demorando a acordar ou rede corporativa bloqueando a porta 5432 | conferir a string direta; tentar de outra rede |
 | Lentidão constante (não só na primeira chamada) | banco e função em regiões diferentes | recriar o banco em AWS US East 1 |
