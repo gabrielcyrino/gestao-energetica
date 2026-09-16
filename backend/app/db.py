@@ -10,7 +10,6 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from fastapi import HTTPException
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -28,26 +27,16 @@ def is_serverless() -> bool:
     return bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("EE_SERVERLESS"))
 
 
-# Preenchido quando a configuração é incompatível com o ambiente: a aplicação sobe assim mesmo
-# (para poder responder com diagnóstico) e recusa apenas as chamadas que dependem do banco.
-CONFIG_ERROR: str | None = None
-
-
-def config_error() -> str | None:
-    return CONFIG_ERROR
-
-
 def _make_engine() -> Engine:
-    global CONFIG_ERROR
     url = get_settings().database_url
     if url.startswith("sqlite"):
         if is_serverless():
-            CONFIG_ERROR = (
+            raise RuntimeError(
                 "SQLite não funciona em ambiente serverless (sistema de arquivos efêmero). "
-                "Defina EE_DATABASE_URL no projeto com um PostgreSQL gerenciado, no formato "
-                "postgresql+psycopg://usuario:senha@host-pooler.../banco?sslmode=require"
+                "Conecte um banco Neon ao projeto Vercel (cria DATABASE_URL automaticamente) ou defina "
+                "EE_DATABASE_URL com um PostgreSQL gerenciado — e faça um novo deploy. "
+                "Guia: docs/08-deploy-vercel.md"
             )
-            return create_engine("sqlite://")  # engine inerte: nenhuma rota de dados é atendida
         Path(url.replace("sqlite:///", "")).parent.mkdir(parents=True, exist_ok=True)
         eng = create_engine(url, connect_args={"check_same_thread": False})
 
@@ -77,8 +66,6 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def get_db() -> Iterator[Session]:
-    if CONFIG_ERROR:
-        raise HTTPException(status_code=503, detail=CONFIG_ERROR)
     db = SessionLocal()
     try:
         yield db
@@ -88,32 +75,6 @@ def get_db() -> Iterator[Session]:
 
 def is_postgres() -> bool:
     return engine.dialect.name == "postgresql"
-
-
-def check_connection() -> dict:
-    """Diagnóstico usado por /health: conexão, schema e volume de dados."""
-    if CONFIG_ERROR:
-        return {"connected": False, "schema_ready": False, "detail": CONFIG_ERROR}
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-            try:
-                users = conn.execute(text("SELECT count(*) FROM app_user")).scalar()
-                rows = conn.execute(text("SELECT count(*) FROM measurement")).scalar()
-            except Exception:  # noqa: BLE001 - schema ainda não carregado
-                return {
-                    "connected": True,
-                    "schema_ready": False,
-                    "detail": "Banco acessível, mas sem as tabelas da aplicação. "
-                    "Rode a carga: EE_DATABASE_URL=... python -m app.seed.run",
-                }
-        return {"connected": True, "schema_ready": True, "users": users, "measurements": rows}
-    except Exception as exc:  # noqa: BLE001 - qualquer falha vira diagnóstico
-        return {
-            "connected": False,
-            "schema_ready": False,
-            "detail": f"{type(exc).__name__}: {str(exc)[:300]}",
-        }
 
 
 def init_db(drop: bool = False) -> None:

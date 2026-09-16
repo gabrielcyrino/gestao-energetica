@@ -54,30 +54,29 @@ docker compose up --build
 
 A primeira subida cria o schema, converte as tabelas temporais em *hypertables* e carrega a base DEMO.
 
-### 1.3 Publicar na Vercel
+### 1.3 Publicar na Vercel com Neon
 
 O repositório já vem preparado (`vercel.json`, `api/index.py`, `requirements.txt`, `.vercelignore`): o SPA vai
-para a CDN e a API vira uma função serverless Python no mesmo domínio (sem CORS). É obrigatório um PostgreSQL
-gerenciado — SQLite não funciona em ambiente serverless.
+para a CDN e a API vira uma função serverless Python no mesmo domínio. O banco é o **Neon** (PostgreSQL
+gerenciado) — SQLite não funciona em ambiente serverless.
 
-```powershell
-# 1. banco gerenciado (ex.: Neon) → copie a connection string COM pooler
-# 2. carregue a base DEMO a partir da sua máquina (usa COPY: ~8 s para 272 mil medições)
-cd backend
-$env:EE_DATABASE_URL = "postgresql+psycopg://usuario:senha@ep-xxx-pooler.../energia?sslmode=require"
-$env:EE_SEED_PASSWORD = "uma-senha-forte"
-.venv\Scripts\python -m app.seed.run
+1. **Vercel → Storage → Create Database → Neon**, região *AWS US East 1*, conectado a Production/Preview/
+   Development. A integração cria `DATABASE_URL`, que a API lê automaticamente.
+2. **Carga da base DEMO** a partir da sua máquina, com a string **direta** (`DATABASE_URL_UNPOOLED`, host sem
+   `-pooler`):
 
-# 3. publique
-cd ..
-npm i -g vercel; vercel login; vercel link
-vercel env add EE_DATABASE_URL production
-vercel env add EE_JWT_SECRET production
-vercel --prod
-```
+   ```powershell
+   cd backend
+   $env:EE_DATABASE_URL  = "postgresql://neondb_owner:SENHA@ep-XXXX.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+   $env:EE_SEED_PASSWORD = "uma-senha-forte"
+   .venv\Scripts\python -m app.seed.run
+   Remove-Item Env:EE_DATABASE_URL, Env:EE_SEED_PASSWORD
+   ```
 
-Passo a passo completo, variáveis de ambiente, segurança do ambiente público, limitações (cold start,
-duração máxima, ausência de TimescaleDB no Neon) e solução de problemas:
+3. **Settings → Environment Variables**: `EE_JWT_SECRET` (aleatório) e `EE_ENVIRONMENT=demo`.
+4. **Redeploy** e verifique `https://SEU-PROJETO.vercel.app/api/auth/demo-users`.
+
+Passo a passo, segurança do ambiente público, limitações e solução de problemas:
 **[docs/08-deploy-vercel.md](docs/08-deploy-vercel.md)**.
 
 ### 1.4 Testes

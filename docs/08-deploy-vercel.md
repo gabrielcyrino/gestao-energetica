@@ -1,11 +1,24 @@
-# Deploy na Vercel
+# Deploy na Vercel com banco Neon
 
-Guia para publicar o dashboard (SPA) **e** a API (FastAPI) em um único projeto Vercel, com PostgreSQL
-gerenciado. Tudo já está preparado no repositório: `vercel.json`, `api/index.py`, `requirements.txt` e
-`.vercelignore`.
+Publica o dashboard (SPA) e a API (FastAPI) em **um único projeto Vercel**, com PostgreSQL no **Neon**. O
+repositório já está preparado: `vercel.json`, `api/index.py`, `requirements.txt` e `.vercelignore`.
 
-> Os dados publicados continuam sendo **DEMO/fictícios**. Antes de publicar em endereço acessível, leia a
-> seção 6 (segurança).
+> Os dados publicados continuam sendo **DEMO/fictícios**. Antes de abrir o endereço para outras pessoas, leia
+> a seção 6.
+
+## Resumo em 5 passos
+
+| # | Passo | Onde |
+|---|---|---|
+| 1 | Criar o banco Neon conectado ao projeto | Vercel → *Storage* |
+| 2 | Carregar a base DEMO no Neon (uma vez) | sua máquina |
+| 3 | Definir `EE_JWT_SECRET` (e `EE_ENVIRONMENT`) | Vercel → *Settings → Environment Variables* |
+| 4 | **Redeploy** | Vercel → *Deployments* |
+| 5 | Verificar | navegador / `curl` |
+
+> **Por que o deploy atual responde 500 em todas as rotas:** sem banco configurado a API não tem onde gravar
+> (SQLite não funciona em serverless) e a função falha ao carregar — a Vercel mostra isso como
+> `FUNCTION_INVOCATION_FAILED`. Os passos abaixo resolvem.
 
 ## 1. Como fica a arquitetura
 
@@ -13,180 +26,150 @@ gerenciado. Tudo já está preparado no repositório: `vercel.json`, `api/index.
 flowchart LR
   U[Navegador] --> CDN[Vercel CDN<br/>SPA estática · frontend/dist]
   U --> FN[Vercel Function Python<br/>api/index.py → FastAPI]
-  FN --> PG[(PostgreSQL gerenciado<br/>Neon · Supabase · Timescale Cloud)]
+  FN -->|DATABASE_URL · pooled| NEON[(Neon PostgreSQL)]
+  DEV[Sua máquina · seed] -->|DATABASE_URL_UNPOOLED · direta| NEON
 ```
 
-- **Mesma origem**: o front-end chama `/api/...` no próprio domínio — não há CORS nem variável de ambiente
-  no front-end.
-- `vercel.json` reescreve `/api/*`, `/health`, `/docs`, `/redoc` e `/openapi.json` para a função Python; todo o
-  resto cai no `index.html` (rotas do SPA).
-- A função recebe o caminho original, então as rotas do FastAPI continuam idênticas ao ambiente local.
+- Front-end e API no **mesmo domínio**: nada de CORS nem variável de ambiente no front-end.
+- `vercel.json` envia `/api/*`, `/health`, `/docs`, `/redoc` e `/openapi.json` para a função Python; o resto
+  cai no `index.html`.
+- `"framework": null` no `vercel.json` é **obrigatório**: sem ele a Vercel detecta FastAPI no
+  `requirements.txt`, o preset de framework assume o projeto e `api/index.py` deixa de ser uma função.
+  Não remova essa linha nem escolha um *Framework Preset* no painel.
+- A função usa a **conexão com pooler** do Neon (sem pool local e sem prepared statements); a carga inicial usa
+  a **conexão direta**.
 
-### O que muda em relação ao ambiente local
+## 2. Criar o banco Neon
 
-| Item | Local / Docker | Vercel |
+### Caminho recomendado — integração pela Vercel
+
+1. No projeto `gestao-energetica` na Vercel: **Storage → Create Database → Neon**.
+2. **Região: AWS US East 1 (N. Virginia)** — a mesma das funções da Vercel por padrão (`iad1`). Banco e função
+   em regiões distantes somam latência a cada consulta.
+3. Plano **Free** é suficiente para a DEMO (a base ocupa algumas dezenas de MB; limite do plano: 0,5 GB).
+4. Conecte o banco ao projeto marcando **Production, Preview e Development**.
+
+A integração cria sozinha, entre outras, estas variáveis no projeto:
+
+| Variável | Tipo | Usada por |
 |---|---|---|
-| Banco | SQLite ou TimescaleDB em container | PostgreSQL gerenciado (obrigatório) |
-| Conexões | pool de 10 no processo | `NullPool` + pooler do provedor (ativado automaticamente por `VERCEL=1`) |
-| Prepared statements | ativos | desativados (exigência do PgBouncer em modo transação) |
-| Processo | servidor contínuo | função efêmera, com *cold start* |
-| Sistema de arquivos | gravável | somente leitura (exceto `/tmp`) — por isso SQLite não funciona |
+| `DATABASE_URL` | com pooler (PgBouncer) | a API na Vercel — lida automaticamente, nada a configurar |
+| `DATABASE_URL_UNPOOLED` | conexão direta | a carga inicial (passo 3 deste guia) |
 
-A aplicação detecta o ambiente: com `VERCEL` (ou `EE_SERVERLESS=1`) definido e `EE_DATABASE_URL` apontando
-para SQLite, a API falha com mensagem explícita em vez de quebrar silenciosamente.
+### Caminho alternativo — conta Neon separada
 
-## 2. Criar o banco
+Crie o projeto no [console do Neon](https://console.neon.tech), abra **Connect** e copie duas strings: com
+*Connection pooling* **ligado** (host com `-pooler`) e **desligado**. Na Vercel, crie `DATABASE_URL` com a
+string com pooler, nos três ambientes. Use a outra na carga inicial.
 
-Qualquer PostgreSQL gerenciado serve. Recomendado para começar: **Neon** (tem plano gratuito e integração na
-Vercel: *Storage → Create Database → Neon*).
+> O formato entregue pelo Neon (`postgresql://…?sslmode=require&channel_binding=require`) é aceito como está —
+> a aplicação ajusta o driver sozinha. Se definida, `EE_DATABASE_URL` tem precedência sobre `DATABASE_URL`.
 
-1. Crie o banco e copie a connection string **com pooler** (host terminado em `-pooler`).
-2. Converta o prefixo para o driver usado pelo projeto:
+## 3. Carregar a base DEMO no Neon (uma vez, da sua máquina)
 
-```
-# string do Neon
-postgresql://usuario:senha@ep-xxx-pooler.sa-east-1.aws.neon.tech/energia?sslmode=require
-
-# valor a usar em EE_DATABASE_URL
-postgresql+psycopg://usuario:senha@ep-xxx-pooler.sa-east-1.aws.neon.tech/energia?sslmode=require
-```
-
-> **TimescaleDB**: Neon e Supabase não têm a extensão. A aplicação percebe isso e segue funcionando em
-> PostgreSQL puro (o repositório de séries usa SQL portável e a chave primária `(variable_id, ts)` atende as
-> consultas). Para volume industrial real — telemetria de 1 min, retenção de anos — use **Timescale Cloud**
-> com a mesma string de conexão: hypertables, compressão e agregados contínuos são criados automaticamente.
-
-## 3. Carregar a base DEMO (uma vez, da sua máquina)
-
-O seed roda localmente contra o banco remoto e usa `COPY` (carga de ~272 mil medições em poucos segundos):
+Use a string **direta** (`DATABASE_URL_UNPOOLED`, host **sem** `-pooler`). Para vê-la: Vercel → *Storage* →
+banco → aba de variáveis (*Show secret*), ou console do Neon → *Connect* com pooling desligado.
 
 ```powershell
-cd backend
-$env:EE_DATABASE_URL = "postgresql+psycopg://usuario:senha@ep-xxx-pooler.../energia?sslmode=require"
-$env:EE_SEED_PASSWORD = "uma-senha-forte"      # senha dos usuários de demonstração
+cd C:\Users\Gabriel\Downloads\bayer-eficiencia-energetica\backend
+
+$env:EE_DATABASE_URL  = "postgresql://neondb_owner:SENHA@ep-XXXX.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+$env:EE_SEED_PASSWORD = "escolha-uma-senha-forte"    # senha dos 5 usuários de demonstração
+
 .venv\Scripts\python -m app.seed.run
+
+# limpa as variáveis para não rodar o ambiente local contra o Neon por engano
+Remove-Item Env:EE_DATABASE_URL, Env:EE_SEED_PASSWORD
 ```
 
-Saída esperada: `banco: postgresql+psycopg://usuario:***@… · medições: 271846 · Base DEMO criada com sucesso.`
+Saída esperada (o tempo depende da sua conexão; as medições são carregadas com `COPY`):
 
-Para recarregar depois, basta repetir o comando (o schema é recriado do zero). Use `--keep` para apenas
-criar o schema sem apagar dados existentes.
-
-## 4. Publicar
-
-### Opção A — CLI (mais rápido, sem precisar de repositório Git)
-
-```powershell
-npm i -g vercel
-cd C:\Users\Gabriel\Downloads\bayer-eficiencia-energetica
-vercel login
-vercel link                 # cria/associa o projeto
-vercel env add EE_DATABASE_URL production
-vercel env add EE_JWT_SECRET production
-vercel env add EE_ENVIRONMENT production      # valor: demo
-vercel --prod
+```
+banco: postgresql+psycopg://neondb_owner:***@ep-XXXX.us-east-1.aws.neon.tech/neondb?...
+...
+[  ... s] medições: 271846
+...
+Base DEMO criada com sucesso.
 ```
 
-> **Importante — `"framework": null`**: a Vercel detecta FastAPI no `requirements.txt` e, nesse modo, assume o
-> roteamento inteiro do projeto, deixando de tratar `api/index.py` como função (resultado: `500` em todas as
-> rotas). O `vercel.json` deste repositório declara `"framework": null` justamente para manter o modelo
-> "SPA estática + função em /api". Não remova essa linha nem sobrescreva o preset no painel.
+- Rodar de novo **recria** o schema do zero (apaga o que houver no banco).
+- O Neon não tem TimescaleDB; a aplicação detecta e usa PostgreSQL puro, sem impacto no funcionamento.
+- Guarde a senha usada em `EE_SEED_PASSWORD`: é com ela que se entra no dashboard publicado.
 
-### Opção B — GitHub
+## 4. Variáveis de ambiente na Vercel
 
-1. `git init && git add . && git commit -m "Dashboard de gestão energética"` e envie para um repositório.
-2. Na Vercel: *Add New → Project → Import*.
-3. **Não altere** Framework Preset, Build Command nem Output Directory: o `vercel.json` já define
-   `npm --prefix frontend ci`, `npm --prefix frontend run build` e `frontend/dist`.
-4. Configure as variáveis de ambiente (seção 5) e faça o deploy.
-
-## 5. Variáveis de ambiente
+*Settings → Environment Variables* (marque **Production, Preview e Development**):
 
 | Variável | Obrigatória | Valor |
 |---|---|---|
-| `EE_DATABASE_URL` | sim | `postgresql+psycopg://…-pooler…?sslmode=require` |
-| `EE_JWT_SECRET` | sim | segredo aleatório longo (ex.: `openssl rand -hex 32`) |
-| `EE_ENVIRONMENT` | recomendado | `demo` (mostra o aviso de dados fictícios) ou `prod` |
-| `EE_DEMO_AUTH` | opcional | `false` esconde a lista de perfis na tela de login |
-| `EE_INGESTION_API_KEY` | opcional | chave usada pelo gateway/ETL no endpoint de ingestão |
-| `EE_CALC_CACHE_TTL` | opcional | segundos de cache de cálculo por instância (padrão 300) |
+| `DATABASE_URL` | sim | criada pela integração Neon (passo 2) |
+| `EE_JWT_SECRET` | sim | segredo aleatório longo — gere com `backend\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"` |
+| `EE_ENVIRONMENT` | recomendado | `demo` (mantém o aviso de dados fictícios) |
+| `EE_DEMO_AUTH` | opcional | `false` esconde os perfis de um clique na tela de login |
+| `EE_INGESTION_API_KEY` | opcional | chave do endpoint de ingestão máquina-a-máquina |
 
-`EE_CORS_ORIGINS` não é necessário: front-end e API compartilham o domínio.
+**Depois de criar ou alterar variáveis, faça Redeploy** (*Deployments → ⋯ → Redeploy*). Variáveis novas não
+entram em deploys que já existem.
 
-## 6. Segurança antes de publicar um endereço acessível
-
-1. **Troque o segredo**: `EE_JWT_SECRET` aleatório e exclusivo do ambiente.
-2. **Troque as senhas de demonstração**: rode o seed com `EE_SEED_PASSWORD` e guarde a senha; sem isso, a
-   senha publicada é `demo`.
-3. **Esconda os perfis de um clique**: `EE_DEMO_AUTH=false` (o formulário de login continua funcionando).
-4. **Restrinja o acesso**, se o conteúdo não puder ser público: *Project → Settings → Deployment Protection*
-   (Vercel Authentication ou Password Protection).
-5. Mantenha o aviso de **DEMO/MOCK DATA** enquanto os dados não forem reais — ele já aparece no cabeçalho e na
-   documentação.
-
-## 7. Verificação pós-deploy
-
-O `/health` é um diagnóstico completo — configuração, conexão e schema:
+## 5. Verificar
 
 ```powershell
-curl https://SEU-PROJETO.vercel.app/health
+curl https://gestao-energetica.vercel.app/health
+# {"status":"ok","database":"postgresql","environment":"demo"}
+
+curl https://gestao-energetica.vercel.app/api/auth/demo-users
+# lista com os 5 perfis → API, conexão com o Neon e carga OK
 ```
 
-| Resposta | Significado | Ação |
-|---|---|---|
-| `{"status":"ok","connected":true,"schema_ready":true,"users":5,"measurements":271846}` | tudo certo | nenhuma |
-| `{"status":"degraded","connected":true,"schema_ready":false}` | banco acessível, sem as tabelas | rodar a carga (seção 3) |
-| `{"status":"error","connected":false,"detail":"..."}` | string de conexão errada, banco pausado ou rede | conferir `EE_DATABASE_URL` e o estado do banco |
-| `{"status":"error","config_error":"SQLite não funciona..."}` | `EE_DATABASE_URL` ausente | definir a variável nos três ambientes e **redeploy** |
-| HTTP 503 com `"stage":"boot"` e `hints` | a função não conseguiu carregar a aplicação | seguir as dicas retornadas (a própria resposta diz o que falta) |
-| HTTP 500 `FUNCTION_INVOCATION_FAILED` em **todas** as rotas | preset de framework assumindo o projeto, dependência ausente no bundle ou versão de Python | conferir `"framework": null` no vercel.json e `vercel logs SEU-PROJETO` |
+No navegador: login com um perfil e a senha do passo 3 → dashboard → *Recebimento → Fluxograma* → clicar em
+**Secador** → abrir um indicador → *Comparações → Crop Year × Crop Year*.
 
-> Variáveis de ambiente só valem para **novos deploys**: depois de criar ou alterar qualquer uma, rode
-> `vercel --prod` de novo (ou *Redeploy* no painel). Marque os três escopos (Production, Preview, Development).
-
-```powershell
-curl https://SEU-PROJETO.vercel.app/openapi.json -o $env:TEMP\openapi.json
-```
-
-Depois, no navegador: login → dashboard → *Recebimento → Fluxograma* → clicar em **Secador** → abrir um
-indicador → *Comparações → Crop Year × Crop Year*. É o mesmo roteiro do script
-`frontend/scripts/ui-acceptance.mjs`, que pode ser executado contra o ambiente publicado:
+Os roteiros automatizados também rodam contra o ambiente publicado (eles entram com a senha `demo`; se você
+definiu outra no seed, ajuste o login no início dos scripts):
 
 ```powershell
 cd frontend
-$env:BASE_URL = "https://SEU-PROJETO.vercel.app"
+$env:BASE_URL = "https://gestao-energetica.vercel.app"
 node scripts/ui-smoke.mjs
 ```
 
-## 8. Limitações e ajustes esperados na Vercel
+A primeira requisição após alguns minutos parado pode levar alguns segundos: o Neon suspende a computação
+ociosa e a função Python também tem *cold start*.
 
-| Tema | Situação | O que fazer |
+## 6. Segurança antes de compartilhar o endereço
+
+1. `EE_JWT_SECRET` aleatório e exclusivo (sem ele, vale o segredo padrão do código).
+2. Senha de demonstração própria via `EE_SEED_PASSWORD` (sem ela, a senha publicada é `demo`).
+3. `EE_DEMO_AUTH=false` para esconder a lista de perfis (o login por formulário continua funcionando).
+4. Se o conteúdo não puder ser público: *Settings → Deployment Protection*.
+5. Mantenha o aviso **DEMO/MOCK DATA** enquanto os dados não forem reais.
+
+## 7. Limitações nesta topologia
+
+| Tema | Situação | Quando incomodar |
 |---|---|---|
-| **Cold start** | primeira chamada após ociosidade leva ~2–5 s (import de numpy/SQLAlchemy + wake-up do banco) | aceitar no demo; em uso real, desativar *scale to zero* no banco e/ou migrar a API para servidor contínuo |
-| **Duração máxima** | `maxDuration: 60` no `vercel.json` | se o plano recusar, reduza para `10`; as consultas medidas ficam entre 0,02 s e 0,5 s |
-| **Sem worker/cron** | materialização de `indicator_value` e alarmes não rodam | usar **Vercel Cron** chamando um endpoint protegido, ou um worker fora da Vercel |
-| **Sem TimescaleDB no Neon** | funciona sem hypertables | Timescale Cloud quando o volume crescer |
-| **Bundle da função** | ~120 MB (numpy, SQLAlchemy, psycopg) — limite 250 MB | manter `requirements.txt` da raiz enxuto |
-| **Ingestão de CSV** | funciona (o arquivo vai para memória e para o banco) | arquivos muito grandes: enviar direto pelo endpoint de API em lotes |
-| **Logs** | `vercel logs SEU-PROJETO --follow` | erros do banco aparecem aqui |
+| Cold start | função Python + Neon suspenso: a primeira chamada pode levar alguns segundos | desligar *autosuspend* no Neon (planos pagos) ou manter a API em servidor contínuo |
+| Duração máxima | `maxDuration: 60` no `vercel.json`; consultas medidas entre 0,02 s e 0,5 s | reduza para `10` se o plano recusar |
+| Worker/cron | materialização de `indicator_value` e alarmes não rodam | Vercel Cron chamando endpoint protegido, ou worker fora da Vercel |
+| TimescaleDB | indisponível no Neon | volume industrial real (1 min, anos de retenção): Timescale Cloud, trocando só a URL |
+| Logs | `vercel logs gestao-energetica` | qualquer erro da função aparece ali com o traceback |
 
-## 9. Problemas comuns
+## 8. Problemas comuns
 
-| Sintoma | Causa provável | Correção |
+| Sintoma | Causa | Correção |
 |---|---|---|
-| `/health` com `config_error` de SQLite | `EE_DATABASE_URL` ausente ou não aplicada ao ambiente | configurar nos três escopos e **redeployar** (variável nova não entra em deploy existente) |
-| 503 com `"stage":"boot"` | a aplicação não carregou | ler `hints` e `traceback` da própria resposta |
-| `ModuleNotFoundError: No module named 'app'` | `backend/**` não subiu com a função | conferir `functions."api/index.py".includeFiles` no `vercel.json` e se `.vercelignore` não exclui `backend/app` |
-| `prepared statement "..." already exists` | string de conexão sem pooler, ou pooler em modo *session* | usar o host `-pooler` (Neon) ou `?pgbouncer=true` (Supabase) |
-| 404 ao recarregar uma rota interna (ex.: `/processos/7`) | rewrite de SPA ausente | manter a última regra de `rewrites` (`/((?!api/).*) → /index.html`) |
-| 504 em comparações longas | `maxDuration` baixo ou banco frio | aumentar `maxDuration`, reduzir o período comparado ou ativar *always-on* no banco |
-| Login falha em produção | seed rodou com outra senha | repetir o seed com `EE_SEED_PASSWORD` conhecido |
+| 500 `FUNCTION_INVOCATION_FAILED` em todas as rotas; log com `RuntimeError: SQLite não funciona em ambiente serverless` | banco não conectado, ou variável criada sem redeploy | passos 2 e 4, depois **Redeploy** |
+| 500 em todas as rotas mesmo com banco configurado | `"framework": null` removido ou preset escolhido no painel | restaurar o `vercel.json`; em *Settings → Build and Deployment*, Framework Preset = *Other* |
+| `relation "app_user" does not exist` nos logs | banco conectado, carga não executada | passo 3 |
+| Login recusado | senha diferente da usada no seed | repetir o passo 3 com `EE_SEED_PASSWORD` conhecido |
+| Seed falha com `connection timeout` | string errada, banco demorando a acordar ou rede corporativa bloqueando a porta 5432 | conferir a string direta; tentar de outra rede |
+| Lentidão constante (não só na primeira chamada) | banco e função em regiões diferentes | recriar o banco em AWS US East 1 |
+| 404 ao recarregar uma rota interna | rewrite do SPA ausente | manter a última regra de `rewrites` no `vercel.json` |
 
-## 10. Alternativas de topologia
+## 9. Outras topologias
 
 | Cenário | Recomendação |
 |---|---|
-| Demonstração e validação com a equipe | **Vercel (este guia)** — simples, um domínio, HTTPS automático |
-| Uso interno contínuo na planta | API em servidor/container (Docker Compose deste repositório) + Timescale Cloud ou PostgreSQL corporativo; front-end pode seguir na Vercel ou no mesmo Nginx |
-| Dois projetos Vercel (front e API separados) | possível: `frontend/` e `backend/` como *Root Directory* distintos; exige `VITE_API_URL` no front e `EE_CORS_ORIGINS` na API |
-| Rede fechada (sem internet) | Docker Compose deste repositório, dentro da rede da planta |
+| Demonstração e validação com a equipe | **Vercel + Neon** (este guia) |
+| Uso interno contínuo | Docker Compose deste repositório (API + TimescaleDB) em servidor/VM; front-end na Vercel ou no mesmo Nginx |
+| Rede fechada da planta | Docker Compose dentro da rede |

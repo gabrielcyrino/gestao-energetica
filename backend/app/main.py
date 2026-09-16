@@ -13,11 +13,10 @@ from fastapi.responses import JSONResponse
 
 from app.api import routes_analysis, routes_assets, routes_core, routes_hierarchy, routes_indicators, routes_ops
 from app.config import get_settings
-from app.db import check_connection, config_error, engine
+from app.db import engine
 from app.engine.formula import FormulaError
 from app.engine.periods import PeriodError
 from app.engine.units import UnitError
-from sqlalchemy.exc import OperationalError, ProgrammingError
 
 settings = get_settings()
 
@@ -93,35 +92,6 @@ for module in (routes_core, routes_hierarchy, routes_assets, routes_indicators, 
     app.include_router(module.router, prefix="/api")
 
 
-@app.exception_handler(OperationalError)
-async def db_unavailable(_: Request, exc: OperationalError):
-    return JSONResponse(
-        status_code=503,
-        content={"detail": f"Banco de dados indisponível: {str(exc.orig)[:300]}"},
-    )
-
-
-@app.exception_handler(ProgrammingError)
-async def db_schema_error(_: Request, exc: ProgrammingError):
-    return JSONResponse(
-        status_code=503,
-        content={
-            "detail": "Banco acessível, mas o schema da aplicação não está carregado. "
-            "Rode a carga inicial: EE_DATABASE_URL=... python -m app.seed.run "
-            f"(detalhe: {str(exc.orig)[:200]})"
-        },
-    )
-
-
 @app.get("/health", tags=["Metadados"])
 def health():
-    """Diagnóstico de implantação: configuração, conexão com o banco e schema carregado."""
-    db = check_connection()
-    status = "ok" if db.get("schema_ready") else ("degraded" if db.get("connected") else "error")
-    return {
-        "status": status,
-        "database": engine.dialect.name,
-        "environment": settings.environment,
-        "config_error": config_error(),
-        **db,
-    }
+    return {"status": "ok", "database": engine.dialect.name, "environment": settings.environment}
