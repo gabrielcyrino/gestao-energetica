@@ -87,6 +87,11 @@ vercel env add EE_ENVIRONMENT production      # valor: demo
 vercel --prod
 ```
 
+> **Importante — `"framework": null`**: a Vercel detecta FastAPI no `requirements.txt` e, nesse modo, assume o
+> roteamento inteiro do projeto, deixando de tratar `api/index.py` como função (resultado: `500` em todas as
+> rotas). O `vercel.json` deste repositório declara `"framework": null` justamente para manter o modelo
+> "SPA estática + função em /api". Não remova essa linha nem sobrescreva o preset no painel.
+
 ### Opção B — GitHub
 
 1. `git init && git add . && git commit -m "Dashboard de gestão energética"` e envie para um repositório.
@@ -134,7 +139,7 @@ curl https://SEU-PROJETO.vercel.app/health
 | `{"status":"error","connected":false,"detail":"..."}` | string de conexão errada, banco pausado ou rede | conferir `EE_DATABASE_URL` e o estado do banco |
 | `{"status":"error","config_error":"SQLite não funciona..."}` | `EE_DATABASE_URL` ausente | definir a variável nos três ambientes e **redeploy** |
 | HTTP 503 com `"stage":"boot"` e `hints` | a função não conseguiu carregar a aplicação | seguir as dicas retornadas (a própria resposta diz o que falta) |
-| HTTP 500 `FUNCTION_INVOCATION_FAILED` | falha antes do nosso código (dependência do bundle, versão de Python) | `vercel logs SEU-PROJETO` |
+| HTTP 500 `FUNCTION_INVOCATION_FAILED` em **todas** as rotas | preset de framework assumindo o projeto, dependência ausente no bundle ou versão de Python | conferir `"framework": null` no vercel.json e `vercel logs SEU-PROJETO` |
 
 > Variáveis de ambiente só valem para **novos deploys**: depois de criar ou alterar qualquer uma, rode
 > `vercel --prod` de novo (ou *Redeploy* no painel). Marque os três escopos (Production, Preview, Development).
