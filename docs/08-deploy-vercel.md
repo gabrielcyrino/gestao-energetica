@@ -121,8 +121,25 @@ vercel --prod
 
 ## 7. Verificação pós-deploy
 
+O `/health` é um diagnóstico completo — configuração, conexão e schema:
+
 ```powershell
-curl https://SEU-PROJETO.vercel.app/health          # {"status":"ok","database":"postgresql",...}
+curl https://SEU-PROJETO.vercel.app/health
+```
+
+| Resposta | Significado | Ação |
+|---|---|---|
+| `{"status":"ok","connected":true,"schema_ready":true,"users":5,"measurements":271846}` | tudo certo | nenhuma |
+| `{"status":"degraded","connected":true,"schema_ready":false}` | banco acessível, sem as tabelas | rodar a carga (seção 3) |
+| `{"status":"error","connected":false,"detail":"..."}` | string de conexão errada, banco pausado ou rede | conferir `EE_DATABASE_URL` e o estado do banco |
+| `{"status":"error","config_error":"SQLite não funciona..."}` | `EE_DATABASE_URL` ausente | definir a variável nos três ambientes e **redeploy** |
+| HTTP 503 com `"stage":"boot"` e `hints` | a função não conseguiu carregar a aplicação | seguir as dicas retornadas (a própria resposta diz o que falta) |
+| HTTP 500 `FUNCTION_INVOCATION_FAILED` | falha antes do nosso código (dependência do bundle, versão de Python) | `vercel logs SEU-PROJETO` |
+
+> Variáveis de ambiente só valem para **novos deploys**: depois de criar ou alterar qualquer uma, rode
+> `vercel --prod` de novo (ou *Redeploy* no painel). Marque os três escopos (Production, Preview, Development).
+
+```powershell
 curl https://SEU-PROJETO.vercel.app/openapi.json -o $env:TEMP\openapi.json
 ```
 
@@ -152,7 +169,8 @@ node scripts/ui-smoke.mjs
 
 | Sintoma | Causa provável | Correção |
 |---|---|---|
-| `RuntimeError: SQLite não funciona em ambiente serverless` | `EE_DATABASE_URL` ausente | configurar a variável no projeto Vercel (todos os ambientes) |
+| `/health` com `config_error` de SQLite | `EE_DATABASE_URL` ausente ou não aplicada ao ambiente | configurar nos três escopos e **redeployar** (variável nova não entra em deploy existente) |
+| 503 com `"stage":"boot"` | a aplicação não carregou | ler `hints` e `traceback` da própria resposta |
 | `ModuleNotFoundError: No module named 'app'` | `backend/**` não subiu com a função | conferir `functions."api/index.py".includeFiles` no `vercel.json` e se `.vercelignore` não exclui `backend/app` |
 | `prepared statement "..." already exists` | string de conexão sem pooler, ou pooler em modo *session* | usar o host `-pooler` (Neon) ou `?pgbouncer=true` (Supabase) |
 | 404 ao recarregar uma rota interna (ex.: `/processos/7`) | rewrite de SPA ausente | manter a última regra de `rewrites` (`/((?!api/).*) → /index.html`) |
