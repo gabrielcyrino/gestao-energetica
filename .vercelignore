@@ -1,0 +1,16 @@
+# Reduz o bundle da função e o tempo de upload.
+backend/.venv
+backend/data
+backend/tests
+backend/Dockerfile
+backend/entrypoint.sh
+backend/requirements-dev.txt
+frontend/node_modules
+frontend/dist
+frontend/scripts
+docs
+docker-compose.yml
+README.md
+**/__pycache__
+**/*.pyc
+.pytest_cache

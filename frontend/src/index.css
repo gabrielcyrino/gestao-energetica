@@ -1,0 +1,291 @@
+@import 'tailwindcss';
+@import '@xyflow/react/dist/style.css';
+
+/* ---------------------------------------------------------------- tokens
+   Paleta categórica e cores de status validadas para daltonismo (protanopia/deuteranopia)
+   e contraste nas duas superfícies (clara #fcfcfb e escura #1a1a19). */
+:root {
+  color-scheme: light;
+  --page: #f1f1ee;
+  --surface: #fcfcfb;
+  --surface-2: #f7f7f4;
+  --surface-3: #eeeeea;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --line: #e1e0d9;
+  --edge: rgba(11, 11, 11, 0.1);
+  --accent: #2a78d6;
+  --accent-ink: #184f95;
+  --accent-soft: #e8f0fd;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --neutral: #898781;
+  --good-text: #006300;
+  --critical-text: #b32424;
+
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
+  --s5: #e87ba4;
+  --s6: #008300;
+  --s7: #4a3aa7;
+  --s8: #e34948;
+
+  --seq-100: #cde2fb;
+  --seq-250: #86b6ef;
+  --seq-400: #3987e5;
+  --seq-550: #1c5cab;
+  --seq-700: #0d366b;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #211f1e;
+  --surface-3: #2c2c2a;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --line: #2c2c2a;
+  --edge: rgba(255, 255, 255, 0.12);
+  --accent: #3987e5;
+  --accent-ink: #86b6ef;
+  --accent-soft: #14243a;
+  --good-text: #0ca30c;
+  --critical-text: #e66767;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
+  --s5: #d55181;
+  --s6: #008300;
+  --s7: #9085e9;
+  --s8: #e66767;
+  --seq-100: #0d366b;
+  --seq-250: #184f95;
+  --seq-400: #2a78d6;
+  --seq-550: #6da7ec;
+  --seq-700: #cde2fb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #211f1e;
+    --surface-3: #2c2c2a;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --line: #2c2c2a;
+    --edge: rgba(255, 255, 255, 0.12);
+    --accent: #3987e5;
+    --accent-ink: #86b6ef;
+    --accent-soft: #14243a;
+    --good-text: #0ca30c;
+    --critical-text: #e66767;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --s5: #d55181;
+    --s6: #008300;
+    --s7: #9085e9;
+    --s8: #e66767;
+    --seq-100: #0d366b;
+    --seq-250: #184f95;
+    --seq-400: #2a78d6;
+    --seq-550: #6da7ec;
+    --seq-700: #cde2fb;
+  }
+}
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-edge: var(--edge);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-neutral: var(--neutral);
+  --color-good-text: var(--good-text);
+  --color-critical-text: var(--critical-text);
+  --color-s1: var(--s1);
+  --color-s2: var(--s2);
+  --color-s3: var(--s3);
+  --color-s4: var(--s4);
+  --color-s5: var(--s5);
+  --color-s6: var(--s6);
+  --color-s7: var(--s7);
+  --color-s8: var(--s8);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--edge);
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* scrollbars discretas */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 10px;
+  }
+  .card-pad {
+    padding: 16px;
+  }
+  .hairline {
+    border-color: var(--edge);
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .label {
+    color: var(--ink-2);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 8px;
+    border: 1px solid var(--edge);
+    background: var(--surface);
+    color: var(--ink);
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-ink);
+    border-color: var(--accent-ink);
+  }
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+  }
+  .input,
+  .select,
+  .textarea {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .input:focus,
+  .select:focus,
+  .textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  .table th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--ink-2);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--edge);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--edge);
+    vertical-align: middle;
+  }
+  .table tbody tr:hover {
+    background: var(--surface-2);
+  }
+  .table .right {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* React Flow ajustado ao tema */
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__handle {
+  opacity: 0;
+}
+.react-flow__edge-text {
+  font-size: 10px;
+  fill: var(--ink-2);
+}
+.react-flow__edge-textbg {
+  fill: var(--surface);
+}
